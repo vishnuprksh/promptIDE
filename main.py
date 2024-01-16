@@ -79,8 +79,6 @@ root.grid_columnconfigure(1, weight=1)
 selected_folder = "/home/vishnuprakash/promptIDE"
 selected_file_path = "/home/vishnuprakash/promptIDE"
 
-# Initial update of file list
-update_file_list(selected_folder)
 
 # Run the GUI
 root.mainloop()
