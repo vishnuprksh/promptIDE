@@ -1,8 +1,10 @@
 import sys
+import os
+import platform
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QRadioButton, QButtonGroup, QLabel,
-    QGroupBox, QMessageBox, QFileDialog
+    QGroupBox, QMessageBox, QFileDialog, QStyleFactory
 )
 from PyQt6.QtCore import Qt
 from ai_service import AIServiceProcessor
@@ -13,12 +15,27 @@ from config import (
     OUTPUT_DIR,
     DEBUG_MODE
 )
-import os
 from datetime import datetime
 
+# Environment check and setup
+def check_display():
+    """Check if running in X11/Wayland environment and configure accordingly"""
+    if platform.system() == "Linux":
+        # Check if running in WSL
+        is_wsl = "microsoft" in platform.uname().release.lower()
+        if is_wsl:
+            os.environ.setdefault('DISPLAY', ':0')
+        
+        # Check for X11 or Wayland
+        if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
+            logging.warning("No display found. If running remotely, ensure X11 forwarding is enabled.")
+            return False
+    return True
+
 class AIGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self, headless=False):
         super().__init__()
+        self.headless = headless
         self.setWindowTitle("AI Code Assistant")
         
         # Initialize AI Service
@@ -26,12 +43,24 @@ class AIGUI(QMainWindow):
         self.ai_processor = AIServiceProcessor(service=self.current_service)
         
         self.setup_logging()
+        self.setup_style()
         self.create_gui()
         
-        # Set window size and center it
+        # Set window size
         self.setMinimumSize(800, 600)
-        self.center_window()
+        if not self.headless:
+            self.center_window()
         
+    def setup_style(self):
+        """Setup application style based on environment"""
+        if platform.system() == "Linux":
+            # Use Fusion style for better remote display compatibility
+            QApplication.setStyle(QStyleFactory.create('Fusion'))
+            
+            # Set up a simpler palette that works well with X11 forwarding
+            palette = self.palette()
+            self.setPalette(palette)
+
     def setup_logging(self):
         """Setup logging configuration"""
         if LOGGING_ENABLED:
@@ -49,6 +78,7 @@ class AIGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(10)  # Increase spacing for better visibility in remote display
         
         # Service selection group
         service_group = QGroupBox("AI Service")
@@ -58,6 +88,10 @@ class AIGUI(QMainWindow):
         gemini_radio = QRadioButton("Gemini")
         openai_radio = QRadioButton("OpenAI")
         gemini_radio.setChecked(True)
+        
+        # Make radio buttons larger for easier remote interaction
+        for radio in (gemini_radio, openai_radio):
+            radio.setMinimumHeight(30)
         
         self.service_button_group.addButton(gemini_radio, 1)
         self.service_button_group.addButton(openai_radio, 2)
@@ -73,12 +107,12 @@ class AIGUI(QMainWindow):
         code_layout = QVBoxLayout()
         
         self.code_textbox = QTextEdit()
+        self.code_textbox.setMinimumHeight(150)  # Ensure minimum height for remote viewing
         code_button_layout = QHBoxLayout()
         
-        load_button = QPushButton("Load Code")
-        clear_code_button = QPushButton("Clear")
-        load_button.clicked.connect(self.load_file)
-        clear_code_button.clicked.connect(self.code_textbox.clear)
+        # Create buttons with minimum size for better remote interaction
+        load_button = self.create_button("Load Code", self.load_file)
+        clear_code_button = self.create_button("Clear", self.code_textbox.clear)
         
         code_button_layout.addWidget(load_button)
         code_button_layout.addWidget(clear_code_button)
@@ -92,14 +126,15 @@ class AIGUI(QMainWindow):
         prompt_group = QGroupBox("Modification Prompt")
         prompt_layout = QVBoxLayout()
         self.prompt_textbox = QTextEdit()
+        self.prompt_textbox.setMinimumHeight(80)
         self.prompt_textbox.setMaximumHeight(100)
         prompt_layout.addWidget(self.prompt_textbox)
         prompt_group.setLayout(prompt_layout)
         main_layout.addWidget(prompt_group)
         
         # Process button
-        process_button = QPushButton("Process")
-        process_button.clicked.connect(self.process_code)
+        process_button = self.create_button("Process", self.process_code)
+        process_button.setMinimumHeight(40)  # Make process button larger
         main_layout.addWidget(process_button)
         
         # Output section
@@ -107,15 +142,12 @@ class AIGUI(QMainWindow):
         output_layout = QVBoxLayout()
         
         self.output_textbox = QTextEdit()
+        self.output_textbox.setMinimumHeight(150)
         output_button_layout = QHBoxLayout()
         
-        save_button = QPushButton("Save Code")
-        clear_output_button = QPushButton("Clear")
-        copy_to_input_button = QPushButton("Copy to Input")
-        
-        save_button.clicked.connect(self.save_file)
-        clear_output_button.clicked.connect(self.output_textbox.clear)
-        copy_to_input_button.clicked.connect(self.copy_to_input)
+        save_button = self.create_button("Save Code", self.save_file)
+        clear_output_button = self.create_button("Clear", self.output_textbox.clear)
+        copy_to_input_button = self.create_button("Copy to Input", self.copy_to_input)
         
         output_button_layout.addWidget(save_button)
         output_button_layout.addWidget(clear_output_button)
@@ -126,12 +158,23 @@ class AIGUI(QMainWindow):
         output_group.setLayout(output_layout)
         main_layout.addWidget(output_group)
 
+    def create_button(self, text, callback):
+        """Create a button with standard remote-friendly settings"""
+        button = QPushButton(text)
+        button.setMinimumHeight(30)
+        button.clicked.connect(callback)
+        return button
+
     def center_window(self):
         """Center the window on the screen"""
-        frame_geometry = self.frameGeometry()
-        screen_center = self.screen().availableGeometry().center()
-        frame_geometry.moveCenter(screen_center)
-        self.move(frame_geometry.topLeft())
+        try:
+            frame_geometry = self.frameGeometry()
+            screen_center = self.screen().availableGeometry().center()
+            frame_geometry.moveCenter(screen_center)
+            self.move(frame_geometry.topLeft())
+        except Exception as e:
+            if LOGGING_ENABLED:
+                self.logger.warning(f"Could not center window: {str(e)}")
 
     def change_service(self, button):
         """Change the AI service"""
@@ -239,13 +282,28 @@ class AIGUI(QMainWindow):
 def main():
     """Main entry point"""
     try:
+        # Check display environment
+        has_display = check_display()
+        
+        # Initialize QApplication
         app = QApplication(sys.argv)
-        window = AIGUI()
+        
+        # Set up application-wide style for remote compatibility
+        if platform.system() == "Linux":
+            app.setStyle(QStyleFactory.create('Fusion'))
+        
+        # Create and show window
+        window = AIGUI(headless=not has_display)
         window.show()
+        
         sys.exit(app.exec())
     except Exception as e:
         logging.error(f"Application error: {str(e)}")
-        QMessageBox.critical(None, "Error", f"Application error: {str(e)}")
+        # Use print for headless environment
+        print(f"Application error: {str(e)}")
+        if has_display:
+            QMessageBox.critical(None, "Error", f"Application error: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
