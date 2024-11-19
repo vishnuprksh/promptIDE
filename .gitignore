@@ -3,3 +3,9 @@ __pycache__
 
 #credentials
 config.py
+
+# logs
+logs/
+
+# output folder
+output/
